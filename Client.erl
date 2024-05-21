@@ -1,5 +1,5 @@
 -module(client).
--export([start/1, add_remote/1, send_msg/2, stop_client/1,print_servers/3,join_server/4,get_server/4]).
+-export([start/1, add_remote/1, send_msg/2, stop_client/1,print_servers/3,join_server/4]).
 
 start(Client) -> register(Client, spawn(fun() -> loop({}) end)).
 
@@ -8,7 +8,6 @@ send_msg(Client, Message) -> Client ! {send, Message}.
 print_servers(Client,Router,RemoteMachine) -> Client ! {print_servers,Router,RemoteMachine}.
 stop_client(Client) -> Client ! {stop_client}.
 % get server
-get_server(Client,Router,RemoteMachine,Server) -> Client ! {get_server,Router,RemoteMachine,Server}.
 % Leave server
 leave_server(Client) -> Client ! {leave_server}.
 % Join server
@@ -19,43 +18,20 @@ loop(Server_Info) ->
         {join_server,Router,RemoteMachine,Server} ->
             {Router,RemoteMachine} ! {join_server,self(),Server},
             receive
-                {_, Reply} -> 
+                {_, Reply, Server_Pid} -> 
                     case Reply of
-                        ok -> io:format("Server joined ~p ~n", [Server]);
+                        ok -> loop(Server_Pid);
                         not_found -> io:format("Server ~p not found~n", [Server])
                     end
             end,
-            loop(Server_Info);
-        {alternate_join} -> 
-            case Server_Info of
-                {Server,Remote} -> 
-                    {Server,Remote} ! {join_server,self()},
-                    receive
-                        {_, _} -> io:format("Server joined ~p ~n", [Server])
-                    end
-            end,
-            loop(Server_Info);
+            loop(Server_Pid);
         {leave_server} ->
             io:format("Leaving server~n"),
+            % Call leave server with the Server id in the Server_Info
             case Server_Info of
-                {Server,Remote} -> 
-                    {Server,Remote} ! {leave_server,self()},
-                    receive
-                        {_, _} -> io:format("You left the chat")
-                    end
+                {Server_Pid} -> Server_Pid ! {leave_server,self()}
             end,
             loop({});
-        {get_server,Router,RemoteMachine,Server} ->
-            {Router,RemoteMachine} ! {get_server,Server},
-            receive
-                {_, Reply,Server,Remote} -> 
-                    case Reply of
-                        ok -> io:format("Server ~p found~n", [Server]),
-                                loop({Server,Remote});
-                        not_found -> io:format("Server ~p not found~n", [Server]),
-                                loop(Server_Info)
-                    end
-            end;
         {send, Message} ->
             case Server_Info of
                 {Server,Remote} -> 
@@ -72,5 +48,5 @@ loop(Server_Info) ->
             end,
             loop(Server_Info);
         {stop_client} ->
-            io:format("Cliente exiting...")
+            io:format("Client exiting...")
     end.
