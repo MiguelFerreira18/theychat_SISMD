@@ -25,6 +25,9 @@ print_router(Router) ->
 loop1(Router, Process, Servers) ->
     process_flag(trap_exit, true),
     receive
+        {switch_server_Pid,Server,New_Pid} ->
+            remove_and_add_new_server(Router, Server, New_Pid),
+            loop1(Router, Process, Servers);
         {add_new_pid, Pid} ->
             io:format("Adding link to second process ~p~n", [Pid]),
             link(Pid),
@@ -44,7 +47,6 @@ loop1(Router, Process, Servers) ->
             loop1(Router, Process, Servers);
         {add_server, Server, Server_Pid} -> %% STORE A MONITOR SERVER
             Process ! {add_server, Server, Server_Pid},
-            link(Server_Pid),
             loop1(Router, Process, [Server | {Server, Server_Pid}]);
         {print_servers} ->
             io:format("Servers: ~p~n", [Servers]),
@@ -53,7 +55,8 @@ loop1(Router, Process, Servers) ->
             Client ! {self(), Servers},
             loop1(Router, Process, Servers);
         {remove_server, Server} ->
-            loop1(Router, Process, lists:delete(Server, Servers));
+            Process ! {remove_server,Server},
+            loop1(Router, Process, delete(Server, Servers));
         {'EXIT', SomePid, Reason} ->
             io:format("Loop1 - SomePid: ~p, Reason: ~p~n", [SomePid, Reason]),
             New_Pid = spawn(fun() -> router:loop2(Router, {}, Servers) end),
@@ -73,9 +76,9 @@ loop2(Router, Process, Servers) ->
             link(Pid),
             loop2(Router, Pid, Servers);
         {add_server, Server, Server_Pid} ->
-            Process ! {add_server, Server, Server_Pid},
-            link(Server_Pid),
             loop2(Router, Process, [Server | {Server, Server_Pid}]);
+        {remove_server,Server} ->
+            loop2(Router, Process, delete(Server, Servers));
         {send_msg, Service, Msg} ->
             Service ! {self(), Msg},
             loop2(Router, Process, Servers);
@@ -97,3 +100,14 @@ loop2(Router, Process, Servers) ->
         {stop} ->
             exit(normal)
     end.
+
+
+remove_and_add_new_server(Router, Server, Server_Pid) ->
+    Router ! {remove_server, Server},
+    Router ! {add_server, Server, Server_Pid}.
+    
+
+% Retorna uma nova lista de servers
+delete(_,[]) -> [];
+delete(Server, [{Server, _} | T]) -> T;
+delete(Server, [H | T]) -> [H | remove_server(Server, T)].

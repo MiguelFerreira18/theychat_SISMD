@@ -16,10 +16,6 @@ join_router(Server, Router, Remote) ->
 loop1(Server, Router ,Process, Clients) ->
 process_flag(trap_exit, true),
 receive
-        {register_router_pid, Router_Pid} -> 
-            io:format("Adding link to second process ~p~n", [Router_Pid]),
-            Router_Pid ! {self(),Server},
-            loop1(Server, Router_Pid,Process, Clients);
         {add_new_pid, Pid} ->
             io:format("Adding link to second process ~p~n", [Pid]),
             link(Pid),
@@ -43,6 +39,7 @@ receive
             io:format("SomePid: ~p, Reason: ~p~n", [SomePid, Reason]),
             New_Pid = spawn(fun() -> loop2(Server,{} ,{}, Clients) end),
             New_Pid ! {add_new_pid, self()},
+            send_new_id(New_Pid, Clients),
             loop1(Server, Router ,New_Pid, Clients);
         {From, stop} ->
             io:format("Received from ~p message to stop!~n", [From]),
@@ -75,8 +72,17 @@ loop2(Server, Router , Process, Clients) ->
             loop2(Server,Router ,Process, Clients);
         {'EXIT', SomePid, Reason} ->
             io:format("SomePid: ~p, Reason: ~p~n", [SomePid, Reason]),
+            % State restored
+        case whereis(Server) == SomePid of
+            false ->
+                ok;
+            true ->
+                unregister(Server)
+            end,
             New_Pid = spawn(fun() -> loop2(Server, Router,{}, Clients) end),
+            register(Server,New_Pid),
             New_Pid ! {add_new_pid, self()},
+            Router ! {switch_server_Pid,New_Pid},
             loop2(Server,Router ,New_Pid, Clients)
     end.
 
@@ -92,3 +98,16 @@ send_message([], _) ->
 send_message([H | T], Message) ->
     H ! {self(), Message},
     send_message(T, Message).
+
+send_new_id(_, []) ->
+    io:format("No more clients to send new id to~n");
+send_new_id(New_Pid, [Client | T]) ->
+    Client ! {switch_pid,self(), New_Pid},
+    send_new_id(New_Pid, T).
+
+
+
+%% ON Server Fail
+% restore data (send Server Monitor data to Server)
+% Send to every client the new Pid of the server
+% Store New Pid (Client)

@@ -1,5 +1,5 @@
 -module(client).
--export([start/1, add_remote/1, send_msg/2, stop_client/1,print_servers/3,join_server/4]).
+-export([start/1, add_remote/1, send_msg/2, stop_client/1,print_servers/3,join_server/4,leave_server/1]).
 
 start(Client) -> register(Client, spawn(fun() -> loop({}) end)).
 
@@ -15,14 +15,12 @@ join_server(Client,Router,RemoteMachine,Server) -> Client ! {join_server,Router,
 
 loop(Server_Info) ->
     receive
+        {switch_server_pid,New_Pid} ->
+            loop(New_Pid);
         {join_server,Router,RemoteMachine,Server} ->
             {Router,RemoteMachine} ! {join_server,self(),Server},
             receive
-                {_, Reply, Server_Pid} -> 
-                    case Reply of
-                        ok -> loop(Server_Pid);
-                        not_found -> io:format("Server ~p not found~n", [Server])
-                    end
+                {_, _, Server_Pid} -> loop(Server_Pid)        
             end,
             loop(Server_Pid);
         {leave_server} ->
