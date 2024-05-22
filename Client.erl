@@ -28,6 +28,7 @@ loop(Server_Info) ->
                 loop(Server_Pid)
             end,
             io:format("Joining server~n"),
+            erlang:monitor(process,Server_Pid),
             loop(Server_Pid);
         {leave_server} ->
             io:format("Leaving server~n"),
@@ -55,6 +56,9 @@ loop(Server_Info) ->
                 {_, Reply} -> io:format("Received from router: ~p~n", [Reply])
             end,
             loop(Server_Info);
+        {'DOWN',_,_,_,_} ->
+            io:format("Lost connection to server"),
+            loop({});
         {stop_client} ->
             io:format("Client exiting...")
     end.
