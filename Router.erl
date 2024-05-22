@@ -26,8 +26,7 @@ loop1(Router, Process, Servers) ->
     process_flag(trap_exit, true),
     receive
         {switch_server_Pid,Server,New_Pid} ->
-            remove_and_add_new_server(Router, Server, New_Pid),
-            loop1(Router, Process, Servers);
+            loop1(Router, Process, [{Server, New_Pid} | Servers]);
         {add_new_pid, Pid} ->
             io:format("Adding link to second process ~p~n", [Pid]),
             link(Pid),
@@ -43,6 +42,7 @@ loop1(Router, Process, Servers) ->
             io:format("Adding server ~p with pid ~p~n", [Server, Server_Pid]),
             Server_Pid ! {add_router, self()},
             Process ! {add_server, Server, Server_Pid},
+            erlang:monitor(process,Server_Pid),
             loop1(Router, Process, [{Server, Server_Pid} | Servers]);
         {print_servers} ->
             io:format("Servers: ~p~n", [Servers]),
@@ -63,6 +63,12 @@ loop1(Router, Process, Servers) ->
             io:format("New_Pid: ~p~n", [New_Pid]),
             New_Pid ! {add_new_pid, self()},
             loop1(Router, New_Pid, Servers);
+        {'DOWN',_ , process,Pid, Reason} ->
+            io:format("DOWN - Pid: ~p, Reason: ~p~n", [Pid, Reason]),
+            New_Servers = remove_monitored_server_by_pid(Pid, Servers),
+            io:format("New Servers: ~p~n", [New_Servers]),
+            Process ! {remove_server_by_id, Pid},
+            loop1(Router, Process,New_Servers);
         {stop} ->
             exit(normal)
     end.
@@ -71,6 +77,9 @@ loop1(Router, Process, Servers) ->
 loop2(Router, Process, Servers) ->
     process_flag(trap_exit, true),
     receive
+        {remove_server_by_id, Pid} ->
+            New_Servers = remove_monitored_server_by_pid(Pid, Servers),
+            loop2(Router, Process, New_Servers);
         {add_new_pid, Pid} ->
             io:format("Adding link to first process ~p~n", [Pid]),
             link(Pid),
@@ -102,9 +111,9 @@ loop2(Router, Process, Servers) ->
     end.
 
 
-remove_and_add_new_server(Router, Server, Server_Pid) ->
-    Router ! {remove_server, Server},
-    Router ! {add_server, Server, Server_Pid}.
+% remove_and_add_new_server(Router, Server, Server_Pid) ->
+%     Router ! {remove_server, Server},
+%     Router ! {add_server, Server, Server_Pid}.
 
 % Retorna o pid do server
 find_server(_, []) -> {};
@@ -116,3 +125,8 @@ find_server(Server, [_ | T]) -> find_server(Server, T).
 delete(_,[]) -> [];
 delete(Server, [{Server, _} | T]) -> T;
 delete(Server, [H | T]) -> [H | remove_server(Server, T)].
+
+
+remove_monitored_server_by_pid(_, []) -> [];
+remove_monitored_server_by_pid(Pid, [{_, Pid} | T]) -> T;
+remove_monitored_server_by_pid(Pid, [H | T]) -> [H | remove_monitored_server_by_pid(Pid, T)].
