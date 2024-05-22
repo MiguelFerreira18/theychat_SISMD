@@ -20,9 +20,14 @@ receive
             io:format("Adding link to second process ~p~n", [Pid]),
             link(Pid),
             loop1(Server, Router,Pid, Clients);
-        {send_server_to_router, Router, Remote} ->
-            {Router, Remote} ! {add_server, Server, self()},
-            loop1(Server, Router,Process, Clients);
+        {send_server_to_router, Send_Router, Remote} ->
+            io:format("Sending server to router ~p~n", [Remote]),
+            {Send_Router, Remote} ! {add_server, Server, self()},
+                receive
+                    {_, Router_Pid} -> io:format("Server added to router~n")
+                end,
+            Process ! {receive_router_pid, Router_Pid},
+            loop1(Server, Router_Pid,Process, Clients);
         {leave_server, Client} ->
             io:format("Received leave_server from ~p~n", [Client]),
             Clients = remove_client(Client, Clients),
@@ -31,13 +36,9 @@ receive
             io:format("Received join_server from ~p~n", [Client]),
             Process ! {join_server, Client},
             loop1(Server, Router ,Process, [Client | Clients]);
-        {send_msg_users,From, Msg} ->
-            io:format("Received ~p: ~p~n", [From, Msg]),
-            Process ! {From, Msg},
-            loop1(Server, Router ,Process, Clients);
         {'EXIT', SomePid, Reason} ->
             io:format("SomePid: ~p, Reason: ~p~n", [SomePid, Reason]),
-            New_Pid = spawn(fun() -> loop2(Server,{} ,{}, Clients) end),
+            New_Pid = spawn(fun() -> loop2(Server,Router ,{}, Clients) end),
             New_Pid ! {add_new_pid, self()},
             send_new_id(New_Pid, Clients),
             loop1(Server, Router ,New_Pid, Clients);
@@ -56,14 +57,24 @@ loop2(Server, Router , Process, Clients) ->
             io:format("Adding link to second process ~p~n", [Pid]),
             link(Pid),
             loop2(Server,Router,Pid, Clients);
+        {receive_router_pid, Router_Pid} ->
+            io:format("Received router pid ~p~n", [Router_Pid]),
+            loop2(Server, Router_Pid,Process, Clients);
         {leave_server, Client} ->
             io:format("Received leave_server from ~p~n", [Client]),
-            Clients = remove_client(Client, Clients),
-            loop2(Server,Router ,Process, Clients);
+            io:format("Old list: ~p ~n", [Clients]),
+            New_Clients = remove_client(Client, Clients),
+            io:format("New List: ~p ~n",[New_Clients]),
+            loop2(Server,Router ,Process, New_Clients);
         {join_server, Client} ->
             io:format("Received join_server from ~p~n", [Client]),
-            Client ! {receive_server,self(), ok},
+            Client ! {receive_server,ok, self()},
             loop2(Server,Router ,Process, [Client | Clients]);
+        {send_msg_users,From, Msg} ->
+            io:format("Received ~p: ~p~n", [From, Msg]),
+            From ! {self(), happy_to_receive_your_message},
+            send_message(Clients, Msg),
+            loop2(Server,Router ,Process, Clients);
         {From, Msg} ->
             io:format("Received ~p: ~p~n", [From, Msg]),
             io:format("Sending reply...~n"),
@@ -79,10 +90,12 @@ loop2(Server, Router , Process, Clients) ->
             true ->
                 unregister(Server)
             end,
-            New_Pid = spawn(fun() -> loop2(Server, Router,{}, Clients) end),
+            io:format("Restoring state...~n"),
+            New_Pid = spawn(fun() -> loop1(Server, Router,{}, Clients) end),
             register(Server,New_Pid),
+            io:format("New_Pid: ~p~n", [New_Pid]),
             New_Pid ! {add_new_pid, self()},
-            Router ! {switch_server_Pid,New_Pid},
+            Router ! {switch_server_Pid,Server,New_Pid},
             loop2(Server,Router ,New_Pid, Clients)
     end.
 
@@ -96,13 +109,13 @@ remove_client(Client, [H | T]) ->
 send_message([], _) ->
     io:format("No more clients to send message to~n");
 send_message([H | T], Message) ->
-    H ! {self(), Message},
+    H ! {receive_message, Message},
     send_message(T, Message).
 
 send_new_id(_, []) ->
     io:format("No more clients to send new id to~n");
 send_new_id(New_Pid, [Client | T]) ->
-    Client ! {switch_pid,self(), New_Pid},
+    Client ! {switch_pid, New_Pid},
     send_new_id(New_Pid, T).
 
 

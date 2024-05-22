@@ -33,30 +33,30 @@ loop1(Router, Process, Servers) ->
             link(Pid),
             loop1(Router, Pid, Servers);
         {join_server, Client, Server} ->
-            case lists:keyfind(Server, 1, Servers) of
-                {Server, Remote} ->
-                    {Client, Remote} ! {self(), Client, add_client},
-                    receive
-                        {_, Reply} ->
-                            io:format("Received from server: ~p~n", [Reply])
-                    end,
-                    Client ! {self(), ok};
-                false ->
-                    Client ! {self(), not_found}
-            end,
+            io:format("Joining server ~p~n", [Server]),
+            Server_Pid = find_server(Server,Servers),
+            io:format("Server_Pid: ~p~n", [Server_Pid]),
+            Server_Pid ! {join_server, Client},
+            io:format("client joined server~n"),
             loop1(Router, Process, Servers);
         {add_server, Server, Server_Pid} -> %% STORE A MONITOR SERVER
+            io:format("Adding server ~p with pid ~p~n", [Server, Server_Pid]),
+            Server_Pid ! {add_router, self()},
             Process ! {add_server, Server, Server_Pid},
-            loop1(Router, Process, [Server | {Server, Server_Pid}]);
+            loop1(Router, Process, [{Server, Server_Pid} | Servers]);
         {print_servers} ->
             io:format("Servers: ~p~n", [Servers]),
             loop1(Router, Process, Servers);
         {print_servers, Client} ->
+            io:format("Servers: ~p~n", [Servers]),
             Client ! {self(), Servers},
             loop1(Router, Process, Servers);
         {remove_server, Server} ->
             Process ! {remove_server,Server},
-            loop1(Router, Process, delete(Server, Servers));
+            io:format("Removing server ~p~n", [Server]),
+            New_servers = delete(Server, Servers),
+            io:format("New servers: ~p~n", [New_servers]),
+            loop1(Router, Process, New_servers);
         {'EXIT', SomePid, Reason} ->
             io:format("Loop1 - SomePid: ~p, Reason: ~p~n", [SomePid, Reason]),
             New_Pid = spawn(fun() -> router:loop2(Router, {}, Servers) end),
@@ -76,7 +76,7 @@ loop2(Router, Process, Servers) ->
             link(Pid),
             loop2(Router, Pid, Servers);
         {add_server, Server, Server_Pid} ->
-            loop2(Router, Process, [Server | {Server, Server_Pid}]);
+            loop2(Router, Process, [ {Server, Server_Pid}| Servers]);
         {remove_server,Server} ->
             loop2(Router, Process, delete(Server, Servers));
         {send_msg, Service, Msg} ->
@@ -105,7 +105,12 @@ loop2(Router, Process, Servers) ->
 remove_and_add_new_server(Router, Server, Server_Pid) ->
     Router ! {remove_server, Server},
     Router ! {add_server, Server, Server_Pid}.
-    
+
+% Retorna o pid do server
+find_server(_, []) -> {};
+find_server(Server, [{Server, Server_Pid} | _]) -> Server_Pid;
+find_server(Server, [_ | T]) -> find_server(Server, T).
+
 
 % Retorna uma nova lista de servers
 delete(_,[]) -> [];
