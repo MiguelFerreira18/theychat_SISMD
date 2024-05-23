@@ -26,6 +26,9 @@ loop1(Router, Process, Servers) ->
     process_flag(trap_exit, true),
     receive
         {switch_server_Pid,Server,New_Pid} ->
+            io:format("Switching server ~p to ~p~n", [Server, New_Pid]),
+            erlang:monitor(process,New_Pid),
+            Process ! {remove_server_by_id,Server},
             loop1(Router, Process, [{Server, New_Pid} | Servers]);
         {add_new_pid, Pid} ->
             io:format("Adding link to second process ~p~n", [Pid]),
@@ -59,7 +62,7 @@ loop1(Router, Process, Servers) ->
             loop1(Router, Process, New_servers);
         {'EXIT', SomePid, Reason} ->
             io:format("Loop1 - SomePid: ~p, Reason: ~p~n", [SomePid, Reason]),
-            New_Pid = spawn(fun() -> router:loop2(Router, {}, Servers) end),
+            New_Pid = spawn(fun() -> loop2(Router, {}, Servers) end),
             io:format("New_Pid: ~p~n", [New_Pid]),
             New_Pid ! {add_new_pid, self()},
             loop1(Router, New_Pid, Servers);
@@ -67,7 +70,7 @@ loop1(Router, Process, Servers) ->
             io:format("DOWN - Pid: ~p, Reason: ~p~n", [Pid, Reason]),
             New_Servers = remove_monitored_server_by_pid(Pid, Servers),
             io:format("New Servers: ~p~n", [New_Servers]),
-            Process ! {remove_server_by_id, Pid},
+            Process ! {remove_server_by_id, New_Servers},
             loop1(Router, Process,New_Servers);
         {stop} ->
             exit(normal)
@@ -77,8 +80,7 @@ loop1(Router, Process, Servers) ->
 loop2(Router, Process, Servers) ->
     process_flag(trap_exit, true),
     receive
-        {remove_server_by_id, Pid} ->
-            New_Servers = remove_monitored_server_by_pid(Pid, Servers),
+        {remove_server_by_id, New_Servers} ->
             loop2(Router, Process, New_Servers);
         {add_new_pid, Pid} ->
             io:format("Adding link to first process ~p~n", [Pid]),

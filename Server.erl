@@ -16,6 +16,11 @@ join_router(Server, Router, Remote) ->
 loop1(Server, Router ,Process, Clients) ->
 process_flag(trap_exit, true),
 receive
+        {monitor_router, New_Router} ->
+        erlang:monitor(process,New_Router),
+        io:format("Monitoring router~n"),
+        io:format("Router: ~p~n", [New_Router]),
+        loop1(Server, New_Router,Process, Clients);
         {add_new_pid, Pid} ->
             io:format("Adding link to second process ~p~n", [Pid]),
             link(Pid),
@@ -27,6 +32,7 @@ receive
                     {_, Router_Pid} -> io:format("Server added to router~n")
                 end,
             Process ! {receive_router_pid, Router_Pid},
+            erlang:monitor(process,Router_Pid),
             loop1(Server, Router_Pid,Process, Clients);
         {leave_server, Client} ->
             io:format("Received leave_server from ~p~n", [Client]),
@@ -36,10 +42,14 @@ receive
             io:format("Received join_server from ~p~n", [Client]),
             Process ! {join_server, Client},
             loop1(Server, Router ,Process, [Client | Clients]);
+        {'DOWN',_,_,_,_} ->
+            io:format("Lost connection to router"),
+            loop1(Server, {}, Process, Clients);
         {'EXIT', SomePid, Reason} ->
             io:format("SomePid: ~p, Reason: ~p~n", [SomePid, Reason]),
             New_Pid = spawn(fun() -> loop2(Server,Router ,{}, Clients) end),
             New_Pid ! {add_new_pid, self()},
+            New_Pid ! {receiving_clients, Clients},
             send_new_id(New_Pid, Clients),
             loop1(Server, Router ,New_Pid, Clients);
         {From, stop} ->
@@ -53,6 +63,10 @@ receive
 loop2(Server, Router , Process, Clients) ->
     process_flag(trap_exit, true),
     receive
+        {receiving_clients,Clients}->
+            io:format("Receiving clients: ~p~n", [Clients]),
+            monitor_clients(Clients),
+            loop2(Server, Router, Process, Clients);
         {add_new_pid, Pid} ->
             io:format("Adding link to second process ~p~n", [Pid]),
             link(Pid),
@@ -68,6 +82,7 @@ loop2(Server, Router , Process, Clients) ->
             loop2(Server,Router ,Process, New_Clients);
         {join_server, Client} ->
             io:format("Received join_server from ~p~n", [Client]),
+            erlang:monitor(process,Client),
             Client ! {receive_server,ok, self()},
             loop2(Server,Router ,Process, [Client | Clients]);
         {send_msg_users,From, Msg} ->
@@ -81,6 +96,9 @@ loop2(Server, Router , Process, Clients) ->
             From ! {self(), happy_to_receive_your_message},
             send_message(Clients, Msg),
             loop2(Server,Router ,Process, Clients);
+        {'DOWN',_,_,Pid,_} ->
+            io:format("User disconnected~n"),
+            loop2(Server, Router, Process, remove_client(Pid, Clients));
         {'EXIT', SomePid, Reason} ->
             io:format("SomePid: ~p, Reason: ~p~n", [SomePid, Reason]),
             % State restored
@@ -94,10 +112,18 @@ loop2(Server, Router , Process, Clients) ->
             New_Pid = spawn(fun() -> loop1(Server, Router,{}, Clients) end),
             register(Server,New_Pid),
             io:format("New_Pid: ~p~n", [New_Pid]),
+            io:format("New_Pid: ~p~n", [Router]),
             New_Pid ! {add_new_pid, self()},
+            New_Pid ! {monitor_router, Router},
             Router ! {switch_server_Pid,Server,New_Pid},
             loop2(Server,Router ,New_Pid, Clients)
     end.
+
+monitor_clients([])-> [];
+monitor_clients([H|T]) -> 
+    erlang:monitor(process,H),
+    monitor_clients(T).
+
 
 remove_client(_, []) ->
     [];
